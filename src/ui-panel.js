@@ -8,6 +8,7 @@ export class RelationshipPanel {
         this.lifecycleProvider = lifecycleProvider;
         this.root = null;
         this.status = '';
+        this.viewportSyncBound = false;
         this.ensureMounted();
     }
 
@@ -16,6 +17,8 @@ export class RelationshipPanel {
         this.root = document.createElement('section');
         this.root.id = 'st-dynamic-relationships-panel';
         document.body.append(this.root);
+        this.bindViewportSync();
+        this.syncViewportPosition();
     }
 
     render(state) {
@@ -41,6 +44,30 @@ export class RelationshipPanel {
                 <div class="stdr-list">${edges.map(edge => renderEdge(edge, state, settings.debugMode)).join('') || '<p>暂无已记录关系。读取角色定义后，生成消息会自动抽取事件。</p>'}</div>
             </div>`;
         this.bind(state);
+        this.syncViewportPosition();
+    }
+
+    bindViewportSync() {
+        if (this.viewportSyncBound) return;
+        const sync = () => this.syncViewportPosition();
+        window.addEventListener('resize', sync, { passive: true });
+        window.addEventListener('scroll', sync, { passive: true });
+        window.visualViewport?.addEventListener('resize', sync, { passive: true });
+        window.visualViewport?.addEventListener('scroll', sync, { passive: true });
+        this.viewportSyncBound = true;
+    }
+
+    syncViewportPosition() {
+        if (!this.root || window.innerWidth > 640) {
+            this.root?.style.removeProperty('--stdr-mobile-left');
+            this.root?.style.removeProperty('--stdr-mobile-top');
+            return;
+        }
+        const viewport = window.visualViewport;
+        const horizontalOffset = viewport?.offsetLeft ?? 0;
+        const verticalOffset = viewport?.offsetTop ?? 0;
+        this.root.style.setProperty('--stdr-mobile-left', `${window.scrollX + horizontalOffset}px`);
+        this.root.style.setProperty('--stdr-mobile-top', `${window.scrollY + verticalOffset}px`);
     }
 
     bind(state) {
