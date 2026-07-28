@@ -1,0 +1,13 @@
+{
+  "name": "st-dynamic-relationships",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
