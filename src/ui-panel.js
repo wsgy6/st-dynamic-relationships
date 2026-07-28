@@ -1,4 +1,5 @@
 import { edgeKey } from './model.js';
+import { ConnectionManagerRequestService } from '../../../shared.js';
 
 export class RelationshipPanel {
     constructor(contextProvider, settingsProvider, lifecycleProvider) {
@@ -34,6 +35,7 @@ export class RelationshipPanel {
                     <label><input data-setting="debugMode" type="checkbox" ${settings.debugMode ? 'checked' : ''}> 调试</label>
                     <label><input data-setting="autoExtract" type="checkbox" ${settings.autoExtract ? 'checked' : ''}> 自动抽取</label>
                 </div>
+                ${renderExtractorSettings(settings)}
                 <p class="stdr-status">${escapeHtml(this.status || statusText(state, edges.length))}</p>
                 <div class="stdr-crushes">${renderCrushes(state)}</div>
                 <div class="stdr-list">${edges.map(edge => renderEdge(edge, state, settings.debugMode)).join('') || '<p>暂无已记录关系。读取角色定义后，生成消息会自动抽取事件。</p>'}</div>
@@ -50,7 +52,10 @@ export class RelationshipPanel {
         this.root.querySelector('[data-action="rollback"]').addEventListener('click', () => this.rollback());
         this.root.querySelector('[data-action="export"]').addEventListener('click', () => this.export());
         this.root.querySelector('.stdr-import input').addEventListener('change', event => this.import(event));
-        this.root.querySelectorAll('[data-setting]').forEach(input => input.addEventListener('change', event => this.changeSetting(event)));
+        this.root.querySelectorAll('input[type="checkbox"][data-setting]').forEach(input => input.addEventListener('change', event => this.changeSetting(event)));
+        this.root.querySelector('[data-setting="extractionProvider"]')?.addEventListener('change', event => this.changeProvider(event));
+        this.root.querySelector('[data-setting="extractionProfileId"]')?.addEventListener('change', event => this.changeProfile(event));
+        this.root.querySelector('[data-setting="extractionResponseLength"]')?.addEventListener('change', event => this.changeNumberSetting(event));
         this.root.querySelectorAll('[data-lock]').forEach(input => input.addEventListener('change', event => this.toggleLock(event)));
         this.root.querySelectorAll('[data-field]').forEach(input => input.addEventListener('change', event => this.editField(event)));
     }
@@ -119,6 +124,26 @@ export class RelationshipPanel {
         this.contextProvider().saveSettingsDebounced();
     }
 
+    changeProvider(event) {
+        const settings = this.settingsProvider();
+        settings.extractionProvider = event.target.value;
+        this.contextProvider().saveSettingsDebounced();
+        this.render(this.lifecycleProvider().store.state);
+    }
+
+    changeProfile(event) {
+        this.settingsProvider().extractionProfileId = event.target.value;
+        this.contextProvider().saveSettingsDebounced();
+        this.render(this.lifecycleProvider().store.state);
+    }
+
+    changeNumberSetting(event) {
+        const value = Math.max(128, Math.min(4096, Number(event.target.value) || 900));
+        this.settingsProvider().extractionResponseLength = value;
+        event.target.value = String(value);
+        this.contextProvider().saveSettingsDebounced();
+    }
+
     async toggleLock(event) {
         const lifecycle = this.lifecycleProvider();
         const edge = lifecycle.store.state.graph.edges[event.target.dataset.edge];
@@ -149,6 +174,26 @@ function renderEdge(edge, state, debugMode) {
     const key = edgeKey(edge.sourceId, edge.targetId);
     const debug = debugMode ? `<details><summary>数值与校正</summary>${renderDebug(edge, key)}</details>` : '';
     return `<article class="stdr-edge"><strong>${escapeHtml(source)} → ${escapeHtml(target)}</strong><span>${escapeHtml(edge.private_feeling)} / ${escapeHtml(edge.romantic_intent)} / ${escapeHtml(edge.public_status)}</span><small>${escapeHtml(edge.last_meaningful_event || '尚无关键事件')}</small>${debug}</article>`;
+}
+
+function renderExtractorSettings(settings) {
+    const profiles = getProfiles();
+    const options = profiles.map(profile => `<option value="${escapeAttribute(profile.id)}" ${profile.id === settings.extractionProfileId ? 'selected' : ''}>${escapeHtml(profile.name || profile.model || profile.id)} · ${escapeHtml(profile.model || profile.api)}</option>`).join('');
+    const profileDisabled = settings.extractionProvider !== 'profile' ? 'disabled' : '';
+    return `<fieldset class="stdr-extractor"><legend>事件抽取 AI</legend>
+        <label>调用方式<select data-setting="extractionProvider"><option value="main" ${settings.extractionProvider !== 'profile' ? 'selected' : ''}>当前主 API</option><option value="profile" ${settings.extractionProvider === 'profile' ? 'selected' : ''}>独立连接档案</option></select></label>
+        <label>连接档案<select data-setting="extractionProfileId" ${profileDisabled}><option value="">请选择</option>${options}</select></label>
+        <label>最大输出 token<input data-setting="extractionResponseLength" type="number" min="128" max="4096" step="64" value="${settings.extractionResponseLength}"></label>
+        <small>${profiles.length ? '密钥和 API 地址由 SillyTavern Connection Manager 管理，本扩展只保存档案 ID。' : '没有可用连接档案；请先在 SillyTavern 连接管理器中创建。'}</small>
+    </fieldset>`;
+}
+
+function getProfiles() {
+    try {
+        return ConnectionManagerRequestService.getSupportedProfiles();
+    } catch {
+        return [];
+    }
 }
 
 function renderCrushes(state) {
