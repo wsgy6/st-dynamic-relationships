@@ -8,6 +8,10 @@
 .stdr-actions button, .stdr-import { padding: 4px 7px; border: 1px solid #667; border-radius: 3px; background: #283848; color: inherit; }
 .stdr-actions label { white-space: nowrap; }
 .stdr-status { color: #b7c7d7; margin: 9px 0; }
+.stdr-extractor { display: grid; gap: 6px; margin: 9px 0; border: 1px solid #526575; }
+.stdr-extractor label { display: grid; grid-template-columns: 105px 1fr; gap: 7px; align-items: center; }
+.stdr-extractor select, .stdr-extractor input { min-width: 0; width: 100%; }
+.stdr-extractor small { color: #b7c7d7; }
 .stdr-crushes { display: grid; gap: 4px; margin-bottom: 8px; }
 .stdr-crushes h3 { margin: 0; font-size: 13px; }
 .stdr-crushes div { display: grid; grid-template-columns: 90px 1fr; gap: 6px; }
