@@ -1,4 +1,5 @@
 import { relationshipEventBatchSchema, parseAndValidateEventBatch } from './schema.js';
+import { ConnectionManagerRequestService } from '../../../shared.js';
 
 export class EventExtractor {
     constructor(contextProvider, settingsProvider) {
@@ -17,12 +18,7 @@ export class EventExtractor {
         this.running = true;
         try {
             const prompt = buildExtractionPrompt(context.chat, messageIndex, knownNodes);
-            const raw = await context.generateRaw({
-                prompt,
-                systemPrompt: '你是关系事件抽取器。只返回符合 JSON Schema 的事实事件，不推测未发生事件，不修改关系数值。',
-                responseLength: this.settingsProvider().extractionResponseLength,
-                jsonSchema: relationshipEventBatchSchema,
-            });
+            const raw = await this.generate(prompt);
             return parseAndValidateEventBatch(raw, knownNodes.map(node => node.id));
         } catch (error) {
             return { valid: false, errors: [`事件抽取失败: ${error.message}`], events: [] };
@@ -30,6 +26,38 @@ export class EventExtractor {
             this.running = false;
         }
     }
+
+    async generate(prompt) {
+        const settings = this.settingsProvider();
+        if (settings.extractionProvider !== 'profile') {
+            return await this.contextProvider().generateRaw({
+                prompt,
+                systemPrompt: extractorSystemPrompt(),
+                responseLength: settings.extractionResponseLength,
+                jsonSchema: relationshipEventBatchSchema,
+            });
+        }
+        if (!settings.extractionProfileId) throw new Error('尚未选择事件抽取连接档案');
+        const profile = ConnectionManagerRequestService.getProfile(settings.extractionProfileId);
+        const messages = [
+            { role: 'system', content: extractorSystemPrompt() },
+            { role: 'user', content: prompt },
+        ];
+        const requestPrompt = ConnectionManagerRequestService.constructPrompt(messages, profile.id);
+        const response = await ConnectionManagerRequestService.sendRequest(
+            profile.id,
+            requestPrompt,
+            settings.extractionResponseLength,
+            { stream: false, extractData: true, includePreset: true, includeInstruct: true },
+            { json_schema: relationshipEventBatchSchema, temperature: 0.1 },
+        );
+        if (!response || typeof response === 'function') throw new Error('独立连接未返回可解析文本');
+        return response.content ?? '';
+    }
+}
+
+function extractorSystemPrompt() {
+    return '你是关系事件抽取器。只返回符合 JSON Schema 的事实事件，不推测未发生事件，不修改关系数值。';
 }
 
 function buildExtractionPrompt(chat, messageIndex, nodes) {
