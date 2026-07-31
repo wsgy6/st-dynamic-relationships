@@ -9,6 +9,8 @@ export class RelationshipPanel {
         this.root = null;
         this.status = '';
         this.viewportSyncBound = false;
+        this.dragState = null;
+        this.suppressToggleClick = false;
         this.ensureMounted();
     }
 
@@ -16,6 +18,7 @@ export class RelationshipPanel {
         if (this.root?.isConnected) return;
         this.root = document.createElement('section');
         this.root.id = 'st-dynamic-relationships-panel';
+        this.root.dataset.mobileDock = this.settingsProvider().mobileDock || 'auto';
         document.body.append(this.root);
         this.bindViewportSync();
         this.syncViewportPosition();
@@ -24,6 +27,7 @@ export class RelationshipPanel {
     render(state) {
         this.ensureMounted();
         const settings = this.settingsProvider();
+        this.root.dataset.mobileDock = settings.mobileDock || 'auto';
         const edges = Object.values(state.graph.edges).filter(edge => edge.evidence.length || edge.romantic_intent !== 'none' || edge.public_status !== 'strangers');
         this.root.innerHTML = `
             <button class="stdr-toggle" title="动态关系网络">关系</button>
@@ -61,6 +65,7 @@ export class RelationshipPanel {
         if (!this.root || window.innerWidth > 640) {
             this.root?.style.removeProperty('--stdr-mobile-left');
             this.root?.style.removeProperty('--stdr-mobile-top');
+            this.root?.style.removeProperty('--stdr-mobile-input-clearance');
             return;
         }
         const viewport = window.visualViewport;
@@ -68,11 +73,41 @@ export class RelationshipPanel {
         const verticalOffset = viewport?.offsetTop ?? 0;
         this.root.style.setProperty('--stdr-mobile-left', `${window.scrollX + horizontalOffset}px`);
         this.root.style.setProperty('--stdr-mobile-top', `${window.scrollY + verticalOffset}px`);
+        this.root.style.setProperty('--stdr-mobile-input-clearance', `${this.getInputClearance()}px`);
+        this.applySavedMobilePosition();
+    }
+
+    getInputClearance() {
+        const inputArea = [...document.querySelectorAll('#send_form, #form_sheld, #chat_send_form, #send_textarea')]
+            .map(element => element.closest('form, #send_form, #form_sheld, #chat_send_form') ?? element)
+            .find(element => element.getClientRects().length && element.getBoundingClientRect().top < window.innerHeight);
+        if (!inputArea) return 68;
+        const rect = inputArea.getBoundingClientRect();
+        return Math.max(68, Math.round(window.innerHeight - rect.top + 8));
+    }
+
+    applySavedMobilePosition() {
+        const settings = this.settingsProvider();
+        if (settings.mobileDock !== 'custom' || !settings.mobilePosition) {
+            this.root.style.removeProperty('--stdr-mobile-drag-left');
+            this.root.style.removeProperty('--stdr-mobile-drag-top');
+            return;
+        }
+        this.root.style.setProperty('--stdr-mobile-drag-left', `${settings.mobilePosition.left}px`);
+        this.root.style.setProperty('--stdr-mobile-drag-top', `${settings.mobilePosition.top}px`);
     }
 
     bind(state) {
         const windowElement = this.root.querySelector('.stdr-window');
-        this.root.querySelector('.stdr-toggle').addEventListener('click', () => { windowElement.hidden = !windowElement.hidden; });
+        const toggle = this.root.querySelector('.stdr-toggle');
+        toggle.addEventListener('click', () => {
+            if (this.suppressToggleClick) {
+                this.suppressToggleClick = false;
+                return;
+            }
+            windowElement.hidden = !windowElement.hidden;
+        });
+        toggle.addEventListener('pointerdown', event => this.startToggleDrag(event));
         this.root.querySelector('.stdr-close').addEventListener('click', () => { windowElement.hidden = true; });
         this.root.querySelector('[data-action="initialize"]').addEventListener('click', () => this.initializeGraph());
         this.root.querySelector('[data-action="rebuild"]').addEventListener('click', () => this.rebuild());
@@ -83,6 +118,7 @@ export class RelationshipPanel {
         this.root.querySelector('[data-setting="extractionProvider"]')?.addEventListener('change', event => this.changeProvider(event));
         this.root.querySelector('[data-setting="extractionProfileId"]')?.addEventListener('change', event => this.changeProfile(event));
         this.root.querySelector('[data-setting="extractionResponseLength"]')?.addEventListener('change', event => this.changeNumberSetting(event));
+        this.root.querySelector('[data-setting="mobileDock"]')?.addEventListener('change', event => this.changeMobileDock(event));
         this.root.querySelectorAll('[data-lock]').forEach(input => input.addEventListener('change', event => this.toggleLock(event)));
         this.root.querySelectorAll('[data-field]').forEach(input => input.addEventListener('change', event => this.editField(event)));
     }
@@ -171,6 +207,64 @@ export class RelationshipPanel {
         this.contextProvider().saveSettingsDebounced();
     }
 
+    changeMobileDock(event) {
+        const settings = this.settingsProvider();
+        settings.mobileDock = event.target.value;
+        if (settings.mobileDock !== 'custom') settings.mobilePosition = null;
+        this.root.dataset.mobileDock = settings.mobileDock;
+        this.contextProvider().saveSettingsDebounced();
+        this.syncViewportPosition();
+    }
+
+    startToggleDrag(event) {
+        if (window.innerWidth > 640 || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        const toggle = event.currentTarget;
+        const rect = toggle.getBoundingClientRect();
+        this.dragState = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, moved: false };
+        toggle.setPointerCapture?.(event.pointerId);
+        const move = moveEvent => this.moveToggleDrag(moveEvent, toggle);
+        const end = endEvent => this.endToggleDrag(endEvent, toggle, move, end);
+        toggle.addEventListener('pointermove', move);
+        toggle.addEventListener('pointerup', end);
+        toggle.addEventListener('pointercancel', end);
+    }
+
+    moveToggleDrag(event, toggle) {
+        const drag = this.dragState;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const moved = Math.abs(event.clientX - drag.startX) > 6 || Math.abs(event.clientY - drag.startY) > 6;
+        if (!moved && !drag.moved) return;
+        drag.moved = true;
+        event.preventDefault();
+        const maximumLeft = Math.max(8, window.innerWidth - toggle.offsetWidth - 8);
+        const maximumTop = Math.max(8, window.innerHeight - this.getInputClearance() - toggle.offsetHeight - 8);
+        const left = Math.max(8, Math.min(maximumLeft, Math.round(event.clientX - drag.offsetX)));
+        const top = Math.max(8, Math.min(maximumTop, Math.round(event.clientY - drag.offsetY)));
+        this.root.dataset.mobileDock = 'custom';
+        this.root.style.setProperty('--stdr-mobile-drag-left', `${left}px`);
+        this.root.style.setProperty('--stdr-mobile-drag-top', `${top}px`);
+    }
+
+    endToggleDrag(event, toggle, move, end) {
+        const drag = this.dragState;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        toggle.removeEventListener('pointermove', move);
+        toggle.removeEventListener('pointerup', end);
+        toggle.removeEventListener('pointercancel', end);
+        toggle.releasePointerCapture?.(event.pointerId);
+        if (drag.moved) {
+            const settings = this.settingsProvider();
+            settings.mobileDock = 'custom';
+            settings.mobilePosition = {
+                left: Number.parseInt(this.root.style.getPropertyValue('--stdr-mobile-drag-left'), 10),
+                top: Number.parseInt(this.root.style.getPropertyValue('--stdr-mobile-drag-top'), 10),
+            };
+            this.contextProvider().saveSettingsDebounced();
+            this.suppressToggleClick = true;
+        }
+        this.dragState = null;
+    }
+
     async toggleLock(event) {
         const lifecycle = this.lifecycleProvider();
         const edge = lifecycle.store.state.graph.edges[event.target.dataset.edge];
@@ -211,7 +305,15 @@ function renderExtractorSettings(settings) {
         <label>调用方式<select data-setting="extractionProvider"><option value="main" ${settings.extractionProvider !== 'profile' ? 'selected' : ''}>当前主 API</option><option value="profile" ${settings.extractionProvider === 'profile' ? 'selected' : ''}>独立连接档案</option></select></label>
         <label>连接档案<select data-setting="extractionProfileId" ${profileDisabled}><option value="">请选择</option>${options}</select></label>
         <label>最大输出 token<input data-setting="extractionResponseLength" type="number" min="128" max="4096" step="64" value="${settings.extractionResponseLength}"></label>
+        <label><input data-setting="isolateExtractionPreset" type="checkbox" ${settings.isolateExtractionPreset ? 'checked' : ''}> 隔离酒馆预设与指令模板</label>
         <small>${profiles.length ? '密钥和 API 地址由 SillyTavern Connection Manager 管理，本扩展只保存档案 ID。' : '没有可用连接档案；请先在 SillyTavern 连接管理器中创建。'}</small>
+    </fieldset>${renderMobileSettings(settings)}`;
+}
+
+function renderMobileSettings(settings) {
+    return `<fieldset class="stdr-mobile-settings"><legend>移动端入口</legend>
+        <label>停靠位置<select data-setting="mobileDock"><option value="auto" ${settings.mobileDock === 'auto' ? 'selected' : ''}>自动避让输入区</option><option value="bottom-right" ${settings.mobileDock === 'bottom-right' ? 'selected' : ''}>右下</option><option value="bottom-left" ${settings.mobileDock === 'bottom-left' ? 'selected' : ''}>左下</option><option value="top-right" ${settings.mobileDock === 'top-right' ? 'selected' : ''}>右上</option><option value="top-left" ${settings.mobileDock === 'top-left' ? 'selected' : ''}>左上</option><option value="custom" ${settings.mobileDock === 'custom' ? 'selected' : ''}>自定义拖动位置</option></select></label>
+        <small>长按并拖动“关系”入口可保存自定义位置；自动和底部停靠会避开酒馆输入区。</small>
     </fieldset>`;
 }
 

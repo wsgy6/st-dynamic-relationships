@@ -29,12 +29,15 @@ export class EventExtractor {
 
     async generate(prompt) {
         const settings = this.settingsProvider();
+        const includePreset = !settings.isolateExtractionPreset;
         if (settings.extractionProvider !== 'profile') {
             return await this.contextProvider().generateRaw({
                 prompt,
                 systemPrompt: extractorSystemPrompt(),
                 responseLength: settings.extractionResponseLength,
                 jsonSchema: relationshipEventBatchSchema,
+                includePreset,
+                includeInstruct: includePreset,
             });
         }
         if (!settings.extractionProfileId) throw new Error('尚未选择事件抽取连接档案');
@@ -48,7 +51,7 @@ export class EventExtractor {
             profile.id,
             requestPrompt,
             settings.extractionResponseLength,
-            { stream: false, extractData: true, includePreset: true, includeInstruct: true },
+            { stream: false, extractData: true, includePreset, includeInstruct: includePreset },
             { json_schema: relationshipEventBatchSchema, temperature: 0.1 },
         );
         if (!response || typeof response === 'function') throw new Error('独立连接未返回可解析文本');

@@ -21,5 +21,6 @@ export const NUMERIC_EDGE_FIELDS = {
 export const DEFAULT_SETTINGS = {
     enabled: true, autoExtract: true, promptDepth: 1, promptBudget: 1400,
     extractionProvider: 'main', extractionProfileId: '', extractionResponseLength: 900,
+    isolateExtractionPreset: true, mobileDock: 'auto', mobilePosition: null,
     maxEvents: 300, maxSnapshots: 60, debugMode: false,
 };
