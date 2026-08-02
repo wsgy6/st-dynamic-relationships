@@ -79,10 +79,79 @@ function invalid(message) {
     return { valid: false, errors: [message], events: [] };
 }
 
-export function parseAndValidateEventBatch(text, knownNodeIds = []) {
+export function parseAndValidateEventBatch(text, knownNodes = []) {
     try {
-        return validateEventBatch(JSON.parse(text), knownNodeIds);
+        const input = JSON.parse(stripCodeFence(String(text ?? '')));
+        const knownNodeIds = knownNodes.map(node => typeof node === 'string' ? node : node.id);
+        return validateEventBatch(normalizeEventBatch(input, knownNodes), knownNodeIds);
     } catch (error) {
         return invalid(`JSON 解析失败: ${error.message}`);
     }
+}
+
+function stripCodeFence(text) {
+    const trimmed = text.trim();
+    const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    return match ? match[1] : trimmed;
+}
+
+function normalizeEventBatch(input, knownNodes) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || !Array.isArray(input.events)) return input;
+    const known = buildNodeLookup(knownNodes);
+    return { events: input.events.map((event, index) => normalizeEvent(event, index, known)) };
+}
+
+function buildNodeLookup(nodes) {
+    const lookup = new Map();
+    for (const node of nodes) {
+        const id = typeof node === 'string' ? node : node.id;
+        const labels = typeof node === 'string' ? [node] : [node.id, node.displayName, ...(node.aliases ?? [])];
+        for (const label of labels) if (typeof label === 'string' && label) lookup.set(label, id);
+    }
+    return lookup;
+}
+
+function normalizeEvent(event, index, known) {
+    if (!event || typeof event !== 'object' || Array.isArray(event) || Object.hasOwn(event, 'event_type')) return event;
+    const participants = event.participants ?? [];
+    return {
+        event_id: `turn-${event.turn_index ?? index}-${index}`,
+        turn_index: event.turn_index,
+        scene_id: event.subtype || '',
+        participants: participants.map(id => resolveNodeId(id, known)),
+        witnesses: (event.witnesses ?? []).map(id => resolveNodeId(id, known)),
+        event_type: mapEventType(event.type, event.subtype),
+        initiator: resolveNodeId(participants[0], known),
+        target: resolveNodeId(participants[1], known),
+        intensity: inferIntensity(event.type, event.subtype),
+        publicity: event.witnesses?.length ? 'witnessed' : 'private',
+        interpretation: {},
+        tags: [event.type, event.subtype].filter(Boolean),
+        evidence_summary: String(event.summary ?? event.evidence ?? '').slice(0, 500),
+    };
+}
+
+function resolveNodeId(value, known) {
+    if (typeof value !== 'string') return value;
+    if (known.has(value)) return known.get(value);
+    const normalized = value.replaceAll('_', ' ');
+    return [...known.entries()].find(([label]) => label.replaceAll('_', ' ') === normalized)?.[1] ?? value;
+}
+
+function mapEventType(type, subtype = '') {
+    const key = `${type ?? ''} ${subtype}`.toLowerCase();
+    if (key.includes('care') || key.includes('cooking') || key.includes('household')) return 'support';
+    if (key.includes('advice') || key.includes('question') || key.includes('conversation') || key.includes('dining')) return 'meaningful_conversation';
+    if (key.includes('ride') || key.includes('date')) return 'date';
+    if (key.includes('betray')) return 'betrayal';
+    if (key.includes('jealous')) return 'jealousy_trigger';
+    if (key.includes('rumor')) return 'rumor';
+    return 'meaningful_conversation';
+}
+
+function inferIntensity(type, subtype) {
+    const key = `${type ?? ''} ${subtype}`.toLowerCase();
+    if (key.includes('care') || key.includes('cooking')) return 0.6;
+    if (key.includes('date') || key.includes('ride')) return 0.5;
+    return 0.35;
 }

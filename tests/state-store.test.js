@@ -39,6 +39,14 @@ test('解析失败不覆盖旧状态', async () => {
     assert.equal(store.state.events.length, 1);
 });
 
+test('兼容 Prompt Template 的代码块和旧事件字段', () => {
+    const result = parseAndValidateEventBatch('```json\n{"events":[{"turn_index":4,"type":"care","subtype":"cooking","participants":["顾清","逸"],"witnesses":[],"summary":"顾清为逸煮面"}]}\n```', [{ id: '顾清', displayName: '顾清' }, { id: '{{user}}', displayName: '逸' }]);
+    assert.equal(result.valid, true);
+    assert.equal(result.events[0].event_type, 'support');
+    assert.equal(result.events[0].initiator, '顾清');
+    assert.equal(result.events[0].target, '{{user}}');
+});
+
 test('编辑或重生成后清除受影响事件副本', async () => {
     const context = fakeContext();
     const store = new StateStore(() => context, () => ({ maxEvents: 300, maxSnapshots: 60 }));

@@ -19,7 +19,7 @@ export class EventExtractor {
         try {
             const prompt = buildExtractionPrompt(context.chat, messageIndex, knownNodes);
             const raw = await this.generate(prompt);
-            return parseAndValidateEventBatch(raw, knownNodes.map(node => node.id));
+            return parseAndValidateEventBatch(raw, knownNodes);
         } catch (error) {
             return { valid: false, errors: [`事件抽取失败: ${error.message}`], events: [] };
         } finally {
