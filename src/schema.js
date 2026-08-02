@@ -96,9 +96,33 @@ function stripCodeFence(text) {
 }
 
 function normalizeEventBatch(input, knownNodes) {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || !Array.isArray(input.events)) return input;
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
     const known = buildNodeLookup(knownNodes);
-    return { events: input.events.map((event, index) => normalizeEvent(event, index, known)) };
+    if (Array.isArray(input.events)) return { events: input.events.map((event, index) => normalizeEvent(event, index, known)) };
+    if (Array.isArray(input.anchors)) return { events: input.anchors.flatMap((anchor, anchorIndex) => normalizeAnchors(anchor, anchorIndex, known)) };
+    return input;
+}
+
+function normalizeAnchors(anchor, anchorIndex, known) {
+    if (!anchor || typeof anchor !== 'object' || !Array.isArray(anchor.edges)) return [];
+    return anchor.edges.map((edge, edgeIndex) => {
+        const participants = [resolveNodeId(edge.s, known), resolveNodeId(edge.t, known)];
+        return {
+            event_id: `anchor-${anchorIndex}-${edgeIndex}`,
+            turn_index: anchor.turn_index ?? anchorIndex,
+            scene_id: anchor.where || anchor.scene || '',
+            participants,
+            witnesses: [],
+            event_type: mapEventType('conversation', edge.r),
+            initiator: participants[0],
+            target: participants[1],
+            intensity: 0.35,
+            publicity: 'private',
+            interpretation: {},
+            tags: ['anchor'],
+            evidence_summary: String(edge.r || anchor.scene || anchor.where || '').slice(0, 500),
+        };
+    });
 }
 
 function buildNodeLookup(nodes) {

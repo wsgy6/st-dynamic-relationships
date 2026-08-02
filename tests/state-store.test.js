@@ -47,6 +47,13 @@ test('兼容 Prompt Template 的代码块和旧事件字段', () => {
     assert.equal(result.events[0].target, '{{user}}');
 });
 
+test('兼容 anchors 关系输出', () => {
+    const result = parseAndValidateEventBatch('{"anchors":[{"scene":"家中","edges":[{"s":"顾清","t":"逸","r":"煮面并叮嘱"}],"where":"翰林雅苑"}]}', [{ id: '顾清', displayName: '顾清' }, { id: '{{user}}', displayName: '逸' }]);
+    assert.equal(result.valid, true);
+    assert.equal(result.events[0].initiator, '顾清');
+    assert.equal(result.events[0].target, '{{user}}');
+});
+
 test('编辑或重生成后清除受影响事件副本', async () => {
     const context = fakeContext();
     const store = new StateStore(() => context, () => ({ maxEvents: 300, maxSnapshots: 60 }));
